@@ -17,7 +17,7 @@ const analysisApiUrl = "https://rudra2003-live-recommend.hf.space/analyze";
 const sevenDaysApiUrl = "https://rudra2003-seven-days-recommend.hf.space/predict";
 const wasteApiUrl = "https://rudra2003-waste.hf.space/calculate-waste";
 const wasteUsageApiUrl = "https://rudra2003-waste.hf.space/suggest-usage";
-const geminiApiKey = "AIzaSyDD8QW1BggDVVMLteDygHCHrD6Ff9Dy0e8";
+const geminiApiKey = "AIzaSyAKzVfHV-E0BTK2RKp-0jAMtGU7NRyOacY";
 const reverseGeocodeApiUrl = "https://state-api-fqbd.onrender.com/reverse-geocode";
 
 const Dashboard = () => {
