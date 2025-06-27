@@ -16,8 +16,8 @@ const thingSpeakUrl = `https://api.thingspeak.com/channels/${channelId}/feeds/la
 const analysisApiUrl = "https://rudra2003-live-recommend.hf.space/analyze";
 const sevenDaysApiUrl = "https://rudra2003-seven-days-recommend.hf.space/predict";
 const wasteApiUrl = "https://rudra2003-waste.hf.space/calculate-waste";
-const googleMapsApiKey = "YOUR_GOOGLE_MAPS_API_KEY"; // Replace with actual Google Maps API key
-const geminiApiKey = "AIzaSyDrPnuKNCWqY7n2HqDVlyl8B-JQNitiod0";
+const geminiApiKey = "AIzaSyDD8QW1BggDVVMLteDygHCHrD6Ff9Dy0e8";
+const reverseGeocodeApiUrl = "https://state-api-fqbd.onrender.com/reverse-geocode";
 
 const Dashboard = () => {
   const { t } = useLanguage();
@@ -25,8 +25,9 @@ const Dashboard = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [selectedCrop, setSelectedCrop] = useState('');
   const [yieldAmount, setYieldAmount] = useState('');
-  const [yieldUnit, setYieldUnit] = useState('kg');
   const [location, setLocation] = useState({ lat: '', lng: '', state: '' });
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const [isLoadingPredictions, setIsLoadingPredictions] = useState(false);
@@ -38,7 +39,8 @@ const Dashboard = () => {
   });
   const [apiSuggestions, setApiSuggestions] = useState([]);
   const [sevenDaysSuggestions, setSevenDaysSuggestions] = useState([]);
-  const [pricePrediction, setPricePrediction] = useState<string | null>(null);
+  const [pricePrediction, setPricePrediction] = useState(null);
+  const [totalValue, setTotalValue] = useState(null);
   const [wasteData, setWasteData] = useState({
     wasted_tons: 0,
     spoilage_percent: 0,
@@ -53,7 +55,7 @@ const Dashboard = () => {
       "Ensure adequate water drainage - पानी की उचित निकासी सुनिश्चित करें"
     ],
     weeklySuggestions: [],
-    predictedPrice: pricePrediction || "₹45,000 per ton",
+    predictedPrice: pricePrediction || null,
     wasteCalculation: `${wasteData.wasted_tons} tons (${wasteData.spoilage_percent}%)`,
     wasteManagement: [
       `Recommended pathway: ${wasteData.recommended_pathway}`,
@@ -77,30 +79,33 @@ const Dashboard = () => {
     ]
   };
 
-  const getStateFromGoogle = async (lat, lon) => {
+  const getStateFromNewApi = async (lat: string, lon: string) => {
     try {
-      const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${googleMapsApiKey}`);
+      console.log(`Calculating state for coordinates: lat=${lat}, lon=${lon}`);
+      const response = await fetch(reverseGeocodeApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ lat, lon })
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      const components = data.results[0].address_components;
-      const stateObj = components.find(c => c.types.includes("administrative_area_level_1"));
-      const state = stateObj ? stateObj.long_name : null;
-      console.log("State:", state);
+      const state = data.state || 'Unknown';
+      console.log(`Derived state: ${state}`);
       return state;
     } catch (err) {
       console.error("Error fetching state:", err);
-      return null;
+      return 'Unknown';
     }
   };
 
-  const fetchCropPrice = async (crop, state) => {
+  const fetchCropPrice = async (crop: string, state: string) => {
     try {
-     const prompt = `Roughly estimate the current market price per ton (in INR) for ${crop} in ${state}, India. 
+      const prompt = `Roughly estimate the current market price per ton (in INR) for ${crop} in ${state}, India. 
 Just give an approximate numeric value like "48000". No explanation or extra text—only the number.`;
-
-
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`, {
         method: 'POST',
@@ -139,11 +144,11 @@ Just give an approximate numeric value like "48000". No explanation or extra tex
       return price;
     } catch (err) {
       console.error("Error fetching crop price:", err.message, err.stack);
-      return 45000; // Fallback price
+      throw err;
     }
   };
 
-  const fetchWasteCalculation = async (crop, totalProductionTons) => {
+  const fetchWasteCalculation = async (crop: string, totalProductionTons: number) => {
     try {
       const response = await fetch(wasteApiUrl, {
         method: 'POST',
@@ -162,18 +167,18 @@ Just give an approximate numeric value like "48000". No explanation or extra tex
 
       const data = await response.json();
       console.log("Waste Calculation Response:", data);
-      return data;
+      return {
+        wasted_tons: data.wasted_tons,
+        spoilage_percent: data.spoilage_percent,
+        recommended_pathway: data.recommended_pathway
+      };
     } catch (err) {
       console.error("Error fetching waste calculation:", err);
-      return {
-        wasted_tons: 0,
-        spoilage_percent: 0,
-        recommended_pathway: 'retain'
-      };
+      throw err;
     }
   };
 
-  const fetchAnalysis = async (crop, temp, humidity, moisture) => {
+  const fetchAnalysis = async (crop: string, temp: number | null, humidity: number | null, moisture: number | null) => {
     try {
       const response = await fetch(analysisApiUrl, {
         method: 'POST',
@@ -201,7 +206,7 @@ Just give an approximate numeric value like "48000". No explanation or extra tex
     }
   };
 
-  const fetchSevenDaysPrediction = async (crop, temperature, humidity) => {
+  const fetchSevenDaysPrediction = async (crop: string, temperature: number | null, humidity: number | null) => {
     try {
       const response = await fetch(sevenDaysApiUrl, {
         method: 'POST',
@@ -305,19 +310,49 @@ Just give an approximate numeric value like "48000". No explanation or extra tex
         async (position) => {
           const lat = position.coords.latitude.toFixed(6);
           const lng = position.coords.longitude.toFixed(6);
-          const state = await getStateFromGoogle(lat, lng);
+          console.log(`Fetching state for coordinates: lat=${lat}, lon=${lng}`);
+          const state = await getStateFromNewApi(lat, lng);
           setLocation({
             lat,
             lng,
-            state: state || 'Unknown'
+            state
           });
           setIsLoadingLocation(false);
         },
         (error) => {
           console.error('Error getting location:', error);
           setIsLoadingLocation(false);
+          setLocation({
+            lat: '',
+            lng: '',
+            state: 'Unknown'
+          });
         }
       );
+    } else {
+      console.error('Geolocation is not supported by this browser.');
+      setIsLoadingLocation(false);
+      setLocation({
+        lat: '',
+        lng: '',
+        state: 'Geolocation not supported'
+      });
+    }
+  };
+
+  const handleManualLocation = async () => {
+    if (manualLat && manualLng) {
+      setIsLoadingLocation(true);
+      console.log(`Fetching state for manual coordinates: lat=${manualLat}, lon=${manualLng}`);
+      const state = await getStateFromNewApi(manualLat, manualLng);
+      setLocation({
+        lat: manualLat,
+        lng: manualLng,
+        state
+      });
+      setIsLoadingLocation(false);
+    } else {
+      alert('Please enter both latitude and longitude.');
     }
   };
 
@@ -327,9 +362,10 @@ Annapurna Shield Recommendations - अन्नपूर्णा शील्�
 
 Current Protection: ${apiSuggestions.length > 0 ? apiSuggestions.join('; ') : predictions.currentSuggestions.join('; ')}
 Weekly Protection: ${sevenDaysSuggestions.length > 0 ? sevenDaysSuggestions.join('; ') : predictions.weeklySuggestions.join('; ')}
-Predicted Price: ${pricePrediction || predictions.predictedPrice}
+Predicted Price: ${pricePrediction || 'N/A'}
+Total Value: ${totalValue ? `₹${totalValue.toLocaleString('en-IN')}` : 'N/A'}
 Waste: ${wasteData.wasted_tons} tons (${wasteData.spoilage_percent}%)
-Location: ${location.state} (${location.lat}, ${location.lng})
+Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
     `.trim();
 
     if (method === 'call') {
@@ -352,7 +388,7 @@ Location: ${location.state} (${location.lat}, ${location.lng})
   useEffect(() => {
     if (selectedCrop && yieldAmount && location.state) {
       setIsLoadingPredictions(true);
-      const totalProductionTons = yieldUnit === 'kg' ? parseFloat(yieldAmount) / 1000 : parseFloat(yieldAmount);
+      const totalProductionTons = parseFloat(yieldAmount);
       
       Promise.all([
         fetchCropPrice(selectedCrop.split(' - ')[0], location.state),
@@ -363,43 +399,48 @@ Location: ${location.state} (${location.lat}, ${location.lng})
         
         const effectiveYieldTons = totalProductionTons - waste.wasted_tons;
         const totalValue = effectiveYieldTons * price;
+        setTotalValue(totalValue);
         console.log(`Effective yield after waste: ${effectiveYieldTons.toFixed(2)} tons`);
         console.log(`Total crop value: ₹${totalValue.toLocaleString('en-IN')}`);
         
         setIsLoadingPredictions(false);
       }).catch(err => {
         console.error("Error in predictions:", err);
-        setPricePrediction(predictions.predictedPrice);
         setIsLoadingPredictions(false);
       });
     }
-  }, [selectedCrop, yieldAmount, yieldUnit, location.state]);
+  }, [selectedCrop, yieldAmount, location.state]);
 
   // Fetch analysis and seven days prediction when crop changes while connected
   useEffect(() => {
     if (isConnected && selectedCrop && sensorData.temperature !== null) {
-      fetchAnalysis(
-        selectedCrop.split(' - ')[0],
-        sensorData.temperature,
-        sensorData.humidity,
-        sensorData.soilMoisture
-      ).then(analysisMessage => {
+      setIsLoadingSuggestions(true);
+      Promise.all([
+        fetchAnalysis(
+          selectedCrop.split(' - ')[0],
+          sensorData.temperature,
+          sensorData.humidity,
+          sensorData.soilMoisture
+        ),
+        fetchSevenDaysPrediction(
+          selectedCrop.split(' - ')[0],
+          sensorData.temperature,
+          sensorData.humidity
+        )
+      ]).then(([analysisMessage, sevenDaysMessage]) => {
         if (analysisMessage) {
           setApiSuggestions([analysisMessage]);
         }
-      });
-
-      fetchSevenDaysPrediction(
-        selectedCrop.split(' - ')[0],
-        sensorData.temperature,
-        sensorData.humidity
-      ).then(sevenDaysMessage => {
         if (sevenDaysMessage) {
           setSevenDaysSuggestions([sevenDaysMessage]);
         }
+        setIsLoadingSuggestions(false);
+      }).catch(err => {
+        console.error("Error fetching suggestions:", err);
+        setIsLoadingSuggestions(false);
       });
     }
-  }, [selectedCrop]);
+  }, [selectedCrop, isConnected, sensorData]);
 
   return (
     <section id="dashboard" className="py-20 bg-gradient-to-br from-green-50 via-blue-50 to-purple-50">
@@ -653,24 +694,13 @@ Location: ${location.state} (${location.lat}, ${location.lng})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-2">
-                <Input 
-                  type="number" 
-                  placeholder="उत्पादन मात्रा दर्ज करें - Enter yield amount"
-                  value={yieldAmount}
-                  onChange={(e) => setYieldAmount(e.target.value)}
-                  className="flex-1 text-lg py-3"
-                />
-                <Select value={yieldUnit} onValueChange={setYieldUnit}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="kg">kg - किग्रा</SelectItem>
-                    <SelectItem value="ton">ton - टन</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <Input 
+                type="number" 
+                placeholder="उत्पादन मात्रा दर्ज करें (टन में) - Enter yield amount (in tons)"
+                value={yieldAmount}
+                onChange={(e) => setYieldAmount(e.target.value)}
+                className="text-lg py-3"
+              />
             </CardContent>
           </Card>
 
@@ -688,7 +718,7 @@ Location: ${location.state} (${location.lat}, ${location.lng})
               <Button 
                 onClick={handleLocationRequest}
                 disabled={isLoadingLocation}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-lg py-3"
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-lg py-3 mb-2"
               >
                 {isLoadingLocation ? (
                   <>
@@ -699,11 +729,46 @@ Location: ${location.state} (${location.lat}, ${location.lng})
                   '📍 वर्तमान स्थान प्राप्त करें - Get Current Location'
                 )}
               </Button>
-              {location.lat && (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    step="0.000001"
+                    placeholder="Latitude (e.g., 22.5699518)"
+                    value={manualLat}
+                    onChange={(e) => setManualLat(e.target.value)}
+                    className="flex-1 text-lg py-3"
+                  />
+                  <Input
+                    type="number"
+                    step="0.000001"
+                    placeholder="Longitude (e.g., 88.4296796)"
+                    value={manualLng}
+                    onChange={(e) => setManualLng(e.target.value)}
+                    className="flex-1 text-lg py-3"
+                  />
+                </div>
+                <Button
+                  onClick={handleManualLocation}
+                  disabled={isLoadingLocation}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-lg py-3"
+                >
+                  {isLoadingLocation ? (
+                    <>
+                      <Loader size="sm" className="mr-2" />
+                      Calculating State...
+                    </>
+                  ) : (
+                    '🔍 Calculate State from Coordinates'
+                  )}
+                </Button>
+              </div>
+              {(location.lat || location.state) && (
                 <div className="text-sm text-gray-600 bg-white p-3 rounded-lg">
-                  <p><strong>राज्य/State:</strong> {location.state}</p>
-                  <p><strong>अक्षांश/Latitude:</strong> {location.lat}</p>
-                  <p><strong>देशांतर/Longitude:</strong> {location.lng}</p>
+                  <p><strong>Calculated from Coordinates:</strong> lat={location.lat}, lon={location.lng}</p>
+                  {location.state && <p><strong>राज्य/State:</strong> {location.state}</p>}
+                  {location.lat && <p><strong>अक्षांश/Latitude:</strong> {location.lat}</p>}
+                  {location.lng && <p><strong>देशांतर/Longitude:</strong> {location.lng}</p>}
                 </div>
               )}
             </CardContent>
@@ -741,7 +806,7 @@ Location: ${location.state} (${location.lat}, ${location.lng})
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl md:text-3xl font-bold text-green-600 mb-2">
-                      {pricePrediction || predictions.predictedPrice}
+                      {pricePrediction || 'N/A'}
                     </div>
                     <div className="flex items-center gap-2">
                       <TrendingUp className="w-4 h-4 text-green-500" />
@@ -773,6 +838,24 @@ Location: ${location.state} (${location.lat}, ${location.lng})
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-purple-200 bg-gradient-to-r from-purple-50 to-pink-50">
+                  <CardHeader>
+                    <CardTitle className="text-purple-800">
+                      <span className="text-orange-600 text-sm block">कुल फसल मूल्य</span>
+                      <span>Total Crop Value</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl md:text-3xl font-bold text-purple-600 mb-2">
+                      {totalValue ? `₹${totalValue.toLocaleString('en-IN')}` : 'N/A'}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-purple-500" />
+                      <span className="text-sm text-gray-600">प्रभावी उत्पादन और मूल्य के आधार पर - Based on effective yield and price</span>
                     </div>
                   </CardContent>
                 </Card>
