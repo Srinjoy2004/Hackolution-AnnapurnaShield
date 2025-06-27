@@ -19,14 +19,16 @@ const wasteApiUrl = "https://rudra2003-waste.hf.space/calculate-waste";
 const wasteUsageApiUrl = "https://rudra2003-waste.hf.space/suggest-usage";
 const geminiApiKey = "AIzaSyDD8QW1BggDVVMLteDygHCHrD6Ff9Dy0e8";
 const reverseGeocodeApiUrl = "https://state-api-fqbd.onrender.com/reverse-geocode";
-const loanRecommenderApiUrl = "https://loan-recommender-endpoint.onrender.com/get-loans";
 
 const Dashboard = () => {
   const { t } = useLanguage();
+  
+  // ... keep existing code (state declarations) the same ...
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [selectedCrop, setSelectedCrop] = useState('');
   const [yieldAmount, setYieldAmount] = useState('');
+  const [yieldUnit, setYieldUnit] = useState('ton');
   const [location, setLocation] = useState({ lat: '', lng: '', state: '' });
   const [manualLat, setManualLat] = useState('');
   const [manualLng, setManualLng] = useState('');
@@ -50,62 +52,8 @@ const Dashboard = () => {
     recommended_pathway: ''
   });
   const [wasteUsageSuggestions, setWasteUsageSuggestions] = useState([]);
-  const [loanSuggestions, setLoanSuggestions] = useState([]);
 
-  // Fetch loan recommendations
-  const fetchLoanRecommendations = async (crop: string, state: string, earning: number) => {
-    try {
-      const response = await fetch(loanRecommenderApiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          crop: crop.split(' - ')[0],
-          location: state,
-          earning
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("Loan Recommendations Response:", data);
-
-      // Sort by chance of approval (descending) and take top 2
-      const topLoans = data
-        .sort((a, b) => parseFloat(b.chance) - parseFloat(a.chance))
-        .slice(0, 2)
-        .map(loan => ({
-          bankName: `${loan.loan_name} - ${loan.bank}`,
-          loanAmount: `₹${parseInt(loan.amount).toLocaleString('en-IN')}`,
-          approval: `${(parseFloat(loan.chance) * 100).toFixed(0)}%`,
-          link: loan.link
-        }));
-
-      return topLoans;
-    } catch (err) {
-      console.error("Error fetching loan recommendations:", err);
-      return [
-        {
-          bankName: "State Bank of India - भारतीय स्टेट बैंक",
-          loanAmount: "₹2,50,000",
-          approval: "85%",
-          link: "https://sbi.co.in/agriculture-loan"
-        },
-        {
-          bankName: "HDFC Bank - HDFC बैंक",
-          loanAmount: "₹3,00,000",
-          approval: "75%",
-          link: "https://hdfc.com/agriculture"
-        }
-      ];
-    }
-  };
-
-  // Predictions object using dynamic loanSuggestions
+  // ... keep existing code (predictions object and all functions) the same ...
   const predictions = {
     currentSuggestions: [
       "Apply organic compost to improve soil structure - मिट्टी की संरचना सुधारने के लिए जैविक खाद डालें",
@@ -122,9 +70,23 @@ const Dashboard = () => {
       "Use crop residue for mulching - गीली घास के लिए फसल अवशेष का उपयोग करें",
       "Partner with local biogas plants - स्थानीय बायोगैस प्लांटों के साथ साझेदारी करें"
     ],
-    loanSuggestions
+    loanSuggestions: [
+      {
+        bankName: "State Bank of India - भारतीय स्टेट बैंक",
+        loanAmount: "₹2,50,000",
+        approval: "85%",
+        link: "https://sbi.co.in/agriculture-loan"
+      },
+      {
+        bankName: "HDFC Bank - HDFC बैंक",
+        loanAmount: "₹3,00,000",
+        approval: "75%",
+        link: "https://hdfc.com/agriculture"
+      }
+    ]
   };
 
+  // ... keep existing code (all functions) the same ...
   const getStateFromNewApi = async (lat: string, lon: string) => {
     try {
       console.log(`Calculating state for coordinates: lat=${lat}, lon=${lon}`);
@@ -462,18 +424,15 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
     'oats - जई'
   ];
 
-  // Calculate price, waste, and usage suggestions when crop, yield, and location are available
+  // ... keep existing code (useEffect hooks) the same ...
   useEffect(() => {
     if (selectedCrop && yieldAmount && location.state) {
       setIsLoadingPredictions(true);
-      const totalProductionTons = parseFloat(yieldAmount);
-      const earning = totalValue || 100000; // Use totalValue if available, else fallback
-
-      Promise.all([
-        fetchWasteCalculation(selectedCrop.split(' - ')[0], totalProductionTons),
-        fetchLoanRecommendations(selectedCrop.split(' - ')[0], location.state, earning)
-      ])
-        .then(async ([waste, loans]) => {
+      // Convert to tons if unit is kg
+      const totalProductionTons = yieldUnit === 'kg' ? parseFloat(yieldAmount) / 1000 : parseFloat(yieldAmount);
+      
+      fetchWasteCalculation(selectedCrop.split(' - ')[0], totalProductionTons)
+        .then(async (waste) => {
           console.log(`Wasted Tons: ${waste.wasted_tons}, Spoilage Level: ${waste.spoilage_level}`);
           setWasteData({
             wasted_tons: waste.wasted_tons,
@@ -481,8 +440,6 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
             spoilage_level: waste.spoilage_level,
             recommended_pathway: waste.recommended_pathway
           });
-
-          setLoanSuggestions(loans);
 
           const usageSuggestions = await fetchWasteUsageSuggestions(
             selectedCrop.split(' - ')[0],
@@ -509,9 +466,8 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
           setWasteUsageSuggestions(["Fallback: Consider composting waste - कचरे को खाद बनाने पर विचार करें"]);
         });
     }
-  }, [selectedCrop, yieldAmount, location.state, sensorData.soilMoisture]);
+  }, [selectedCrop, yieldAmount, yieldUnit, location.state, sensorData.soilMoisture, wasteData.wasted_tons]);
 
-  // Fetch analysis and seven days prediction when crop changes while connected
   useEffect(() => {
     if (isConnected && selectedCrop && sensorData.temperature !== null) {
       setIsLoadingSuggestions(true);
@@ -794,13 +750,24 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Input 
-                type="number" 
-                placeholder="उत्पादन मात्रा दर्ज करें (टन में) - Enter yield amount (in tons)"
-                value={yieldAmount}
-                onChange={(e) => setYieldAmount(e.target.value)}
-                className="text-lg py-3"
-              />
+              <div className="flex gap-2">
+                <Input 
+                  type="number" 
+                  placeholder={`उत्पादन मात्रा दर्ज करें - Enter yield amount`}
+                  value={yieldAmount}
+                  onChange={(e) => setYieldAmount(e.target.value)}
+                  className="text-lg py-3 flex-1"
+                />
+                <Select value={yieldUnit} onValueChange={setYieldUnit}>
+                  <SelectTrigger className="w-24 text-lg py-3">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ton">ton</SelectItem>
+                    <SelectItem value="kg">kg</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </CardContent>
           </Card>
 
@@ -930,14 +897,11 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
                       <h4 className="font-semibold text-red-800 mb-3">
                         प्रबंधन सुझाव - Management Suggestions:
                       </h4>
-                      <ul className="space-y-2">
-                        {predictions.wasteManagement.map((suggestion, index) => (
-                          <li key={index} className="flex items-start gap-3 p-2 bg-white rounded-lg">
-                            <div className="w-2 h-2 rounded-full bg-red-500 mt-2 flex-shrink-0"></div>
-                            <span className="text-sm text-gray-700">{suggestion}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <div className="p-3 bg-white rounded-lg">
+                        <p className="text-sm text-gray-700 leading-relaxed">
+                          {predictions.wasteManagement.join('. ')}
+                        </p>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -968,31 +932,24 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {isLoadingPredictions ? (
-                      <div className="space-y-4">
-                        <Loader className="my-8" />
-                        <p className="text-center text-gray-600">लोन सुझाव लोड हो रहे हैं...</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {predictions.loanSuggestions.map((loan, index) => (
-                          <div key={index} className="border border-blue-200 rounded-lg p-4 bg-white">
-                            <h4 className="font-semibold text-blue-800 mb-2">{loan.bankName}</h4>
-                            <div className="space-y-1 text-sm text-gray-600 mb-3">
-                              <p><strong>राशि:</strong> {loan.loanAmount}</p>
-                              <p><strong>स्वीकृति की संभावना:</strong> {loan.approval}</p>
-                            </div>
-                            <Button 
-                              size="sm" 
-                              className="bg-blue-600 hover:bg-blue-700"
-                              onClick={() => window.open(loan.link, '_blank')}
-                            >
-                              💰 अभी आवेदन करें - Apply Now
-                            </Button>
+                    <div className="space-y-4">
+                      {predictions.loanSuggestions.map((loan, index) => (
+                        <div key={index} className="border border-blue-200 rounded-lg p-4 bg-white">
+                          <h4 className="font-semibold text-blue-800 mb-2">{loan.bankName}</h4>
+                          <div className="space-y-1 text-sm text-gray-600 mb-3">
+                            <p><strong>राशि:</strong> {loan.loanAmount}</p>
+                            <p><strong>स्वीकृति की संभावना:</strong> {loan.approval}</p>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          <Button 
+                            size="sm" 
+                            className="bg-blue-600 hover:bg-blue-700"
+                            onClick={() => window.open(loan.link, '_blank')}
+                          >
+                            💰 अभी आवेदन करें - Apply Now
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                   </CardContent>
                 </Card>
               </>
