@@ -16,6 +16,7 @@ const thingSpeakUrl = `https://api.thingspeak.com/channels/${channelId}/feeds/la
 const analysisApiUrl = "https://rudra2003-live-recommend.hf.space/analyze";
 const sevenDaysApiUrl = "https://rudra2003-seven-days-recommend.hf.space/predict";
 const wasteApiUrl = "https://rudra2003-waste.hf.space/calculate-waste";
+const wasteUsageApiUrl = "https://rudra2003-waste.hf.space/suggest-usage";
 const geminiApiKey = "AIzaSyDD8QW1BggDVVMLteDygHCHrD6Ff9Dy0e8";
 const reverseGeocodeApiUrl = "https://state-api-fqbd.onrender.com/reverse-geocode";
 
@@ -44,8 +45,10 @@ const Dashboard = () => {
   const [wasteData, setWasteData] = useState({
     wasted_tons: 0,
     spoilage_percent: 0,
+    spoilage_level: '',
     recommended_pathway: ''
   });
+  const [wasteUsageSuggestions, setWasteUsageSuggestions] = useState([]);
 
   // Predictions object defined before use
   const predictions = {
@@ -59,6 +62,7 @@ const Dashboard = () => {
     wasteCalculation: `${wasteData.wasted_tons} tons (${wasteData.spoilage_percent}%)`,
     wasteManagement: [
       `Recommended pathway: ${wasteData.recommended_pathway}`,
+      ...wasteUsageSuggestions,
       "Compost organic waste for soil enrichment - मिट्टी समृद्धि के लिए जैविक कचरे को खाद बनाएं",
       "Use crop residue for mulching - गीली घास के लिए फसल अवशेष का उपयोग करें",
       "Partner with local biogas plants - स्थानीय बायोगैस प्लांटों के साथ साझेदारी करें"
@@ -167,14 +171,45 @@ Just give an approximate numeric value like "48000". No explanation or extra tex
 
       const data = await response.json();
       console.log("Waste Calculation Response:", data);
-      return {
+      console.log(`Wasted Tons: ${data.wasted_tons}, Spoilage Level: ${data.spoilage_level}`);
+      setWasteData({
         wasted_tons: data.wasted_tons,
         spoilage_percent: data.spoilage_percent,
+        spoilage_level: data.spoilage_level,
         recommended_pathway: data.recommended_pathway
-      };
+      });
+      return data;
     } catch (err) {
       console.error("Error fetching waste calculation:", err);
       throw err;
+    }
+  };
+
+  const fetchWasteUsageSuggestions = async (crop: string, moisture: number | null, spoilage_level: string, wasted_tons: number) => {
+    try {
+      const response = await fetch(wasteUsageApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          crop,
+          moisture: moisture || 0,
+          spoilage_level,
+          wasted_tons
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("Waste Usage Suggestions Response:", data);
+      return data.suggestions || [];
+    } catch (err) {
+      console.error("Error fetching waste usage suggestions:", err);
+      return ["Fallback: Consider composting waste - कचरे को खाद बनाने पर विचार करें"];
     }
   };
 
@@ -240,6 +275,7 @@ Just give an approximate numeric value like "48000". No explanation or extra tex
       setSensorData({ temperature: null, humidity: null, soilMoisture: null });
       setApiSuggestions([]);
       setSevenDaysSuggestions([]);
+      setWasteUsageSuggestions([]);
     } else {
       setIsConnecting(true);
       fetch(thingSpeakUrl)
@@ -256,7 +292,6 @@ Just give an approximate numeric value like "48000". No explanation or extra tex
           console.log(`Grain's Moisture (field1): ${data.field1}`);
           console.log(`Grain's Temp (field2): ${data.field2}`);
           console.log(`Air Humidity (field3): ${data.field3}`);
-
           const newSensorData = {
             temperature: parseFloat(data.field2) || null,
             humidity: parseFloat(data.field3) || null,
@@ -299,6 +334,7 @@ Just give an approximate numeric value like "48000". No explanation or extra tex
           setSensorData({ temperature: null, humidity: null, soilMoisture: null });
           setApiSuggestions([]);
           setSevenDaysSuggestions([]);
+          setWasteUsageSuggestions([]);
         });
     }
   };
@@ -384,32 +420,48 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
     'oats - जई'
   ];
 
-  // Calculate price and waste when crop, yield, and location are available
+  // Calculate price, waste, and usage suggestions when crop, yield, and location are available
   useEffect(() => {
     if (selectedCrop && yieldAmount && location.state) {
       setIsLoadingPredictions(true);
       const totalProductionTons = parseFloat(yieldAmount);
       
-      Promise.all([
-        fetchCropPrice(selectedCrop.split(' - ')[0], location.state),
-        fetchWasteCalculation(selectedCrop.split(' - ')[0], totalProductionTons)
-      ]).then(([price, waste]) => {
-        setPricePrediction(`₹${price.toLocaleString('en-IN')} per ton`);
-        setWasteData(waste);
-        
-        const effectiveYieldTons = totalProductionTons - waste.wasted_tons;
-        const totalValue = effectiveYieldTons * price;
-        setTotalValue(totalValue);
-        console.log(`Effective yield after waste: ${effectiveYieldTons.toFixed(2)} tons`);
-        console.log(`Total crop value: ₹${totalValue.toLocaleString('en-IN')}`);
-        
-        setIsLoadingPredictions(false);
-      }).catch(err => {
-        console.error("Error in predictions:", err);
-        setIsLoadingPredictions(false);
-      });
+      fetchWasteCalculation(selectedCrop.split(' - ')[0], totalProductionTons)
+        .then(async (waste) => {
+          console.log(`Wasted Tons: ${waste.wasted_tons}, Spoilage Level: ${waste.spoilage_level}`);
+          setWasteData({
+            wasted_tons: waste.wasted_tons,
+            spoilage_percent: waste.spoilage_percent,
+            spoilage_level: waste.spoilage_level,
+            recommended_pathway: waste.recommended_pathway
+          });
+
+          const usageSuggestions = await fetchWasteUsageSuggestions(
+            selectedCrop.split(' - ')[0],
+            sensorData.soilMoisture,
+            waste.spoilage_level,
+            waste.wasted_tons
+          );
+          setWasteUsageSuggestions(usageSuggestions);
+
+          return fetchCropPrice(selectedCrop.split(' - ')[0], location.state);
+        })
+        .then(price => {
+          setPricePrediction(`₹${price.toLocaleString('en-IN')} per ton`);
+          const effectiveYieldTons = totalProductionTons - wasteData.wasted_tons;
+          const totalValue = effectiveYieldTons * price;
+          setTotalValue(totalValue);
+          console.log(`Effective yield after waste: ${effectiveYieldTons.toFixed(2)} tons`);
+          console.log(`Total crop value: ₹${totalValue.toLocaleString('en-IN')}`);
+          setIsLoadingPredictions(false);
+        })
+        .catch(err => {
+          console.error("Error in predictions:", err);
+          setIsLoadingPredictions(false);
+          setWasteUsageSuggestions(["Fallback: Consider composting waste - कचरे को खाद बनाने पर विचार करें"]);
+        });
     }
-  }, [selectedCrop, yieldAmount, location.state]);
+  }, [selectedCrop, yieldAmount, location.state, sensorData.soilMoisture]);
 
   // Fetch analysis and seven days prediction when crop changes while connected
   useEffect(() => {
@@ -824,7 +876,7 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="text-lg font-semibold text-red-600 bg-red-100 p-3 rounded-lg">
-                      {predictions.wasteCalculation}
+                      {wasteData.wasted_tons} tons wasted ({wasteData.spoilage_percent}%)
                     </div>
                     <div>
                       <h4 className="font-semibold text-red-800 mb-3">
