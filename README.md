@@ -66,7 +66,7 @@ Your Hindi voice agent can:
 
 > *(Insert screenshots here with correct file/image links)*
 
-- **Crop Suggestions & Advisory**  
+- **Protection Suggestions & Advisory**  
   ![Crop UI](link-to-image)
 
 - **Location + Price Prediction**  
