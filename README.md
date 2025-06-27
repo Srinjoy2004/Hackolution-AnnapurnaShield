@@ -70,7 +70,7 @@ Your Hindi voice agent can:
   ![Crop UI](link-to-image)
 
 - **Location + Price Prediction**  
-  ![Location UI](location price.png)
+  ![Location UI](location.png)
 
 - **Waste & Loan Suggestions**  
   ![Waste UI](suggestion.png)
