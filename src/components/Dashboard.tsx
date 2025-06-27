@@ -19,6 +19,7 @@ const wasteApiUrl = "https://rudra2003-waste.hf.space/calculate-waste";
 const wasteUsageApiUrl = "https://rudra2003-waste.hf.space/suggest-usage";
 const geminiApiKey = "AIzaSyDD8QW1BggDVVMLteDygHCHrD6Ff9Dy0e8";
 const reverseGeocodeApiUrl = "https://state-api-fqbd.onrender.com/reverse-geocode";
+const loanRecommenderApiUrl = "https://loan-recommender-endpoint.onrender.com/get-loans";
 
 const Dashboard = () => {
   const { t } = useLanguage();
@@ -49,8 +50,62 @@ const Dashboard = () => {
     recommended_pathway: ''
   });
   const [wasteUsageSuggestions, setWasteUsageSuggestions] = useState([]);
+  const [loanSuggestions, setLoanSuggestions] = useState([]);
 
-  // Predictions object defined before use
+  // Fetch loan recommendations
+  const fetchLoanRecommendations = async (crop: string, state: string, earning: number) => {
+    try {
+      const response = await fetch(loanRecommenderApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          crop: crop.split(' - ')[0],
+          location: state,
+          earning
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log("Loan Recommendations Response:", data);
+
+      // Sort by chance of approval (descending) and take top 2
+      const topLoans = data
+        .sort((a, b) => parseFloat(b.chance) - parseFloat(a.chance))
+        .slice(0, 2)
+        .map(loan => ({
+          bankName: `${loan.loan_name} - ${loan.bank}`,
+          loanAmount: `₹${parseInt(loan.amount).toLocaleString('en-IN')}`,
+          approval: `${(parseFloat(loan.chance) * 100).toFixed(0)}%`,
+          link: loan.link
+        }));
+
+      return topLoans;
+    } catch (err) {
+      console.error("Error fetching loan recommendations:", err);
+      return [
+        {
+          bankName: "State Bank of India - भारतीय स्टेट बैंक",
+          loanAmount: "₹2,50,000",
+          approval: "85%",
+          link: "https://sbi.co.in/agriculture-loan"
+        },
+        {
+          bankName: "HDFC Bank - HDFC बैंक",
+          loanAmount: "₹3,00,000",
+          approval: "75%",
+          link: "https://hdfc.com/agriculture"
+        }
+      ];
+    }
+  };
+
+  // Predictions object using dynamic loanSuggestions
   const predictions = {
     currentSuggestions: [
       "Apply organic compost to improve soil structure - मिट्टी की संरचना सुधारने के लिए जैविक खाद डालें",
@@ -67,20 +122,7 @@ const Dashboard = () => {
       "Use crop residue for mulching - गीली घास के लिए फसल अवशेष का उपयोग करें",
       "Partner with local biogas plants - स्थानीय बायोगैस प्लांटों के साथ साझेदारी करें"
     ],
-    loanSuggestions: [
-      {
-        bankName: "State Bank of India - भारतीय स्टेट बैंक",
-        loanAmount: "₹2,50,000",
-        approval: "85%",
-        link: "https://sbi.co.in/agriculture-loan"
-      },
-      {
-        bankName: "HDFC Bank - HDFC बैंक",
-        loanAmount: "₹3,00,000",
-        approval: "75%",
-        link: "https://hdfc.com/agriculture"
-      }
-    ]
+    loanSuggestions
   };
 
   const getStateFromNewApi = async (lat: string, lon: string) => {
@@ -425,9 +467,13 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
     if (selectedCrop && yieldAmount && location.state) {
       setIsLoadingPredictions(true);
       const totalProductionTons = parseFloat(yieldAmount);
-      
-      fetchWasteCalculation(selectedCrop.split(' - ')[0], totalProductionTons)
-        .then(async (waste) => {
+      const earning = totalValue || 100000; // Use totalValue if available, else fallback
+
+      Promise.all([
+        fetchWasteCalculation(selectedCrop.split(' - ')[0], totalProductionTons),
+        fetchLoanRecommendations(selectedCrop.split(' - ')[0], location.state, earning)
+      ])
+        .then(async ([waste, loans]) => {
           console.log(`Wasted Tons: ${waste.wasted_tons}, Spoilage Level: ${waste.spoilage_level}`);
           setWasteData({
             wasted_tons: waste.wasted_tons,
@@ -435,6 +481,8 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
             spoilage_level: waste.spoilage_level,
             recommended_pathway: waste.recommended_pathway
           });
+
+          setLoanSuggestions(loans);
 
           const usageSuggestions = await fetchWasteUsageSuggestions(
             selectedCrop.split(' - ')[0],
@@ -920,24 +968,31 @@ Location: ${location.state} (lat: ${location.lat}, lon: ${location.lng})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-4">
-                      {predictions.loanSuggestions.map((loan, index) => (
-                        <div key={index} className="border border-blue-200 rounded-lg p-4 bg-white">
-                          <h4 className="font-semibold text-blue-800 mb-2">{loan.bankName}</h4>
-                          <div className="space-y-1 text-sm text-gray-600 mb-3">
-                            <p><strong>राशि:</strong> {loan.loanAmount}</p>
-                            <p><strong>स्वीकृति की संभावना:</strong> {loan.approval}</p>
+                    {isLoadingPredictions ? (
+                      <div className="space-y-4">
+                        <Loader className="my-8" />
+                        <p className="text-center text-gray-600">लोन सुझाव लोड हो रहे हैं...</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {predictions.loanSuggestions.map((loan, index) => (
+                          <div key={index} className="border border-blue-200 rounded-lg p-4 bg-white">
+                            <h4 className="font-semibold text-blue-800 mb-2">{loan.bankName}</h4>
+                            <div className="space-y-1 text-sm text-gray-600 mb-3">
+                              <p><strong>राशि:</strong> {loan.loanAmount}</p>
+                              <p><strong>स्वीकृति की संभावना:</strong> {loan.approval}</p>
+                            </div>
+                            <Button 
+                              size="sm" 
+                              className="bg-blue-600 hover:bg-blue-700"
+                              onClick={() => window.open(loan.link, '_blank')}
+                            >
+                              💰 अभी आवेदन करें - Apply Now
+                            </Button>
                           </div>
-                          <Button 
-                            size="sm" 
-                            className="bg-blue-600 hover:bg-blue-700"
-                            onClick={() => window.open(loan.link, '_blank')}
-                          >
-                            💰 अभी आवेदन करें - Apply Now
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </>
